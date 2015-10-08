@@ -1,6 +1,6 @@
 {
 	"AWSTemplateFormatVersion": "2010-09-09",
-	"Description": "YouView CloudFormation Template for the C2B Ingest environment.",
+	"Description": "Cloudformation template to spin up single spot instance with EFS volume for persistent data",
 	
 	"Parameters": { 
 		"Environment": { "Description": "Environment", "Type": "String" },
