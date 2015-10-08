@@ -1,0 +1,106 @@
+#!/bin/bash
+# Script: stack.
+# Description: User interactive stack creation or update script
+# designed to combine native CloudFormation JSON formatted parameters
+# with a CloudFormation template. Script is designed to never update
+# AMI associated with a loaded stack - instead it retrieves the 
+# AMI for the stack it is about to update and updates the local 
+# parameters file before running the update. This is to prevent
+# application accidentially being reverted to a previous release
+# where releases are being managed by Jenkins.
+# This script does not create an AMI.
+#
+# Usage: stack.sh template-<resource>.json template-<resource>-params-<env>.json <profile>
+# where <profile> is the profile to be used from the default awscli credentials on the users local workstation.
+
+function getOpts() { grep "\"$1\"" $2 | tr '"' ' '  | awk '{print $7}' ; }
+
+ACTION="$1"
+TEMPLATE="$2"
+TEMPLATE_PARAMS="$3"
+if [ -z "$4" ]
+then
+	PROFILE=""
+	echo -e "\nERROR: No AWS profile supplied, please try again.\n"
+	exit
+else
+	PROFILE="--profile $4"
+fi
+
+if ! [ "${ACTION}" == "create" ] && ! [ "${ACTION}" == "update" ]
+then
+	echo -e "\nERROR: Invalid action.\n"
+	echo -e "Usage: $0 create|update template_name template_params [credentials_profile]\n"
+	exit 
+fi
+
+SERVICE=$(getOpts Service $TEMPLATE_PARAMS)
+COMPONENT=$(getOpts Component $TEMPLATE_PARAMS)
+ENVIRONMENT=$(getOpts Environment $TEMPLATE_PARAMS)
+REGION="eu-west-1"
+STACK_NAME=${SERVICE}-${COMPONENT}-${ENVIRONMENT}
+
+echo -e "\nService: $SERVICE, Component: $COMPONENT, Environment: $ENVIRONMENT"  
+
+if [ -z "${COMPONENT}" ] || [ -z "${SERVICE}" ] || [ -z "${ENVIRONMENT}" ]
+then
+	echo -e "\nMandatory tag is not defined in the ${TEMPLATE_PARAMS} file, exiting.\n"
+	exit
+fi
+
+# add tags only if creating stack
+if [ "${ACTION}" == "create" ]
+then
+	TAGS="--tags Key=Environment,Value=${ENVIRONMENT} Key=Service,Value=${SERVICE} Key=Component,Value=${COMPONENT}"
+	echo -e "The stack will be created with the following tags: ${TAGS}\n"
+
+# if we are updating the stack get AMI ID for running stack update the local params template
+else
+	TAGS=""
+	LAUNCH_CONFIGURATION=$(aws ${PROFILE} cloudformation describe-stack-resources --stack-name ${STACK_NAME} | grep LaunchConfiguration | grep ${SERVICE} | sed  's/"/\n/g' | grep LaunchConfiguration)
+	if [ -z "${LAUNCH_CONFIGURATION}" ]
+	then 
+		echo -e "No launch config containing an AMI found in this stack."
+	else
+		AMI_RUNNING=$(aws ${PROFILE} autoscaling describe-launch-configurations --launch-configuration-names ${LAUNCH_CONFIGURATION} | grep ImageId | sed -e 's/"/\n/g' | grep ami-)
+		AMI_LOCAL=$(grep -o "ami-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]" ${TEMPLATE_PARAMS})
+	
+		if [ -z "${AMI_RUNNING}" ] && [ -z "${AMI_LOCAL}" ]
+		then
+			echo -e "There is no AMI referenced in this stack.\n"
+		elif [ "${AMI_LOCAL}" == "${AMI_RUNNING}" ]
+		then
+			echo -e "AMI ${AMI_LOCAL} in ${TEMPLATE_PARAMS} is same as in running stack.\n"
+		elif ! [ -z  "${AMI_LOCAL}" ] && ! [ -z "${AMI_RUNNING}" ]
+		then
+			echo -e "Updating AMI in ${TEMPLATE_PARAMS} from ${AMI_LOCAL} to match running AMI ${AMI_RUNNING}.\n"
+			sed -i "s/\"ami-[a-z0-9]{8}\"/\"${AMI_RUNNING}\"/" ${TEMPLATE_PARAMS}
+		else
+			echo -e "ERROR: AMI ${AMI_RUNNING} is defined in running stack but no ImageId parameter is configured in ${TEMPLATE_PARAMS}.\n"
+		fi
+	fi
+fi
+
+read -p "Press Enter to ${ACTION} stack..."
+
+aws ${PROFILE} --region ${REGION} cloudformation ${ACTION}-stack --capabilities CAPABILITY_IAM --template-body file://${TEMPLATE} --parameters file://$TEMPLATE_PARAMS ${TAGS} --stack-name ${STACK_NAME}
+
+STACKINFO=$(aws ${PROFILE} cloudformation describe-stacks --region ${REGION} --stack-name ${STACK_NAME} --output text | grep ^STACKS)
+while true 
+do
+  if [[ "${STACKINFO}" == *"UPDATE_COMPLETE"* ]] || [[ "${STACKINFO}" == *"CREATE_COMPLETE"* ]];
+  then
+  	echo "Stack ${ACTION}: ${STACKINFO}"
+  	aws ${PROFILE} cloudformation list-stack-resources --region ${REGION} --stack-name ${STACK_NAME}
+    break
+  elif [[ "${STACKINFO}" = *"UPDATE_ROLLBACK_COMPLETE"* ]] || [[ "${STACKINFO}" = *"ROLLBACK_COMPLETE"* ]];
+  then
+    aws ${PROFILE} cloudformation describe-stack-events --region ${REGION} --stack-name ${STACK_NAME}
+    echo "Stack ${ACTION}: ${STACKINFO}"
+    exit 1
+  fi
+    echo "Waiting for stack to be ${ACTION}d..."
+    sleep 5
+    STACKINFO=$(aws ${PROFILE} cloudformation describe-stacks --region ${REGION} --stack-name ${STACK_NAME} --output text | grep ^STACKS)
+done
+
