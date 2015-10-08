@@ -1,0 +1,50 @@
+[
+  {
+    "ParameterKey": "Service","ParameterValue": "wordpress"
+  },
+  {
+    "ParameterKey": "Component", "ParameterValue": "main"
+  },
+  {
+    "ParameterKey": "PublicSubnetIdA","ParameterValue": "subnet-111a3a79"
+  },
+  {
+    "ParameterKey": "PublicSubnetIdB","ParameterValue": "subnet-a13d59c4"
+  },
+  {
+    "ParameterKey": "PublicSubnetIdC","ParameterValue": "subnet-4686201f"
+  },
+  {
+    "ParameterKey": "Environment","ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "ImageId","ParameterValue": "ami-69b9941e"
+  },
+  {
+    "ParameterKey": "InstanceType","ParameterValue": "t2.micro"
+  },
+  {
+    "ParameterKey": "KeyName","ParameterValue": "id_rsa_home.pub"
+  },
+  {
+    "ParameterKey": "MgmtSecurityGroup","ParameterValue": "sg-f2336497"
+  },
+  {
+    "ParameterKey": "VpcId","ParameterValue": "vpc-27b31b42"
+  },
+  {
+  "ParameterKey": "PauseTime", "ParameterValue": "PT0S"
+  },
+  {
+  "ParameterKey": "MaxBatchSize", "ParameterValue": "1"
+  },
+  {
+  "ParameterKey": "MinInstancesInService", "ParameterValue": "0"
+  },
+  {
+  "ParameterKey": "MinSize", "ParameterValue": "1"
+  },   
+  {
+  "ParameterKey": "MaxSize", "ParameterValue": "1"
+  }
+]

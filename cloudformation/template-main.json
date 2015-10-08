@@ -1,0 +1,187 @@
+{
+	"AWSTemplateFormatVersion": "2010-09-09",
+	"Description": "YouView CloudFormation Template for the C2B Ingest environment.",
+	
+	"Parameters": { 
+		"Environment": { "Description": "Environment", "Type": "String" },
+		"PublicSubnetIdA": { "Description": "VPC Application Subnet ID in Availability Zone C", "Type": "String" },
+		"PublicSubnetIdB": { "Description": "VPC Application Subnet ID in Availability Zone C", "Type": "String" },
+		"PublicSubnetIdC": { "Description": "Subnet ID of VPC Application Subnet in Availability Zone C", "Type": "String" },
+		"Service": { "Description": "Name of application component", "Type": "String" },
+		"Environment": { "Description": "Environment", "Type": "String" },
+		"ImageId": { "Description": "ID of AMI to use for message reader application tier instances","Type": "String" },
+		"InstanceType": { "Description": "Message-reader application tier EC2 instance type", "Type": "String" },
+		"KeyName": { "Description": "Key pair to enable SSH access", "Type": "String" },
+		"MgmtSecurityGroup": { "Description": "Security Group ID of VPC Management Security Group", "Type": "String" },
+		"VpcId": { "Description": "VPC ID of your existing Virtual Private Cloud (VPC)", "Type": "String" },
+		"Component": { "Description": "Type of template", "Type": "String" },
+		"PauseTime": { "Description": "Amount of time to pause between scaling events", "Type": "String" },
+		"MaxBatchSize": { "Description": "Max number of instances to terminate in any one go", "Type": "String" },
+		"MinInstancesInService": { "Description": "Minimum number of instances in service while replacing obsolete MinInstancesInService", "Type": "String" },
+		"MinSize" : { "Description" : "Minimum number of instances in autoscaling group", "Type": "String" },
+		"MaxSize": { "Description" : "Desired number of instances in autoscaling group", "Type": "String" }
+
+	},
+	"Resources": {
+	
+		"InstanceProfile" : {
+			"Type" : "AWS::IAM::InstanceProfile",
+				"Properties" : {
+				"Path" : "/",
+				"Roles" : [ { "Ref" : "InstanceRole" } ]
+			}
+		},
+		"InstanceRole" : {
+			"Type": "AWS::IAM::Role",
+			"Properties": {
+				"AssumeRolePolicyDocument": {
+					"Statement": [ {
+						"Effect": "Allow",
+						"Principal": { "Service": [ "ec2.amazonaws.com" ] },
+						"Action": [ "sts:AssumeRole" ]
+					} ]
+				},
+				"Path": "/"
+			}
+		},
+		"CloudwatchLogsAccessPolicy" : {
+			"Type" : "AWS::IAM::Policy",
+			"Properties" : {
+				"PolicyName" : "CloudwatchLogsAccessPolicy",
+				"PolicyDocument" : {
+					"Statement" : [
+						{
+							"Effect": "Allow",
+							"Action": [
+								"logs:CreateLogGroup",
+								"logs:CreateLogStream",
+								"logs:PutLogEvents",
+								"logs:DescribeLogStreams",
+								"logs:DescribeLogGroups",
+								"logs:PutRetentionPolicy"
+							],
+							"Resource": [
+								"arn:aws:logs:*:*:*"
+							]
+						}
+					]
+				},
+				"Roles" : [ { "Ref" : "InstanceRole"} ]
+			}
+		},
+
+		"S3AccessPolicy" : {
+			"Type" : "AWS::IAM::Policy",
+			"Properties" : {
+				"PolicyName" : "S3AccessPolicy",
+				"PolicyDocument" : {
+					"Statement" : [
+						{
+							"Effect": "Allow",
+							"Action": [ "s3:GetBucketLocation", "s3:ListBucket", "s3:ListAllMyBuckets", "s3:PutBucketNotification", "s3:GetBucketNotification" ],
+							"Resource" : {"Fn::Join" : [ "", [ 
+										"arn:aws:s3:::",
+								         { "Ref": "Service" }, "-",
+								         { "Ref": "Component" }, "-",
+								         { "Ref": "Environment" },"-",
+										 "s3"] ]}
+						},
+
+						{
+							"Effect": "Allow",
+							"Action": [ "s3:GetObject","s3:GetBucketLocation","s3:ListBucket","s3:PutObject" ],
+							"Resource" : {"Fn::Join" : [ "", [ 
+										"arn:aws:s3:::",
+										 { "Ref": "Service" }, "-",
+								         { "Ref": "Component" }, "-",
+								         { "Ref": "Environment" },"-",
+										 "s3/events/*"] ]}
+						}
+					]
+				},
+				
+				"Roles" : [ { "Ref" : "InstanceRole"} ]
+			}
+		},
+
+		
+		"AppSecurityGroup": {
+			"Type": "AWS::EC2::SecurityGroup",
+			"Properties": {
+				"GroupDescription": "Security group for message reader",
+				"VpcId": {
+					"Ref": "VpcId"
+				}
+			}
+		},
+		
+		"AutoscalingGroup": {
+			"UpdatePolicy": {
+                "AutoScalingRollingUpdate": {
+                    "PauseTime": {
+                        "Ref": "PauseTime"
+                    }, 
+                    "MaxBatchSize": {
+                        "Ref": "MaxBatchSize"
+                    }, 
+                    "MinInstancesInService": {
+                        "Ref": "MinInstancesInService"
+                    }
+                }
+            }, 
+			"Type": "AWS::AutoScaling::AutoScalingGroup",
+			"Properties": {
+				"LaunchConfigurationName": {
+					"Ref": "LaunchConfiguration"
+				},
+				"MinSize" : { "Ref": "MinSize" },
+				"MaxSize" : { "Ref": "MaxSize" },
+				"AvailabilityZones": [
+					"eu-west-1a",
+					"eu-west-1b",
+					"eu-west-1c"
+				],
+				"VPCZoneIdentifier": [
+					{ "Ref": "PublicSubnetIdA" },
+					{ "Ref": "PublicSubnetIdB" },
+					{ "Ref": "PublicSubnetIdC" }
+				],
+				"Tags": [
+					{
+						"Key": "Name",
+						"Value": {
+							"Fn::Join" : [ "-", [ 
+								{ "Ref" : "Service" },
+								{ "Ref" : "Component" },
+								{ "Ref" : "Environment" }
+							] ]
+						},
+						"PropagateAtLaunch": "true"
+					}
+				]
+			}
+		},
+		"LaunchConfiguration": {
+			"Type": "AWS::AutoScaling::LaunchConfiguration",
+			"Properties": {
+				"KeyName": { "Ref": "KeyName" },
+				"IamInstanceProfile" : { "Ref" : "InstanceProfile" },
+				"ImageId": { "Ref": "ImageId" },
+				"InstanceType": { "Ref": "InstanceType" },
+				"SecurityGroups": [
+					{ "Ref": "MgmtSecurityGroup" }, 
+					{ "Ref": "AppSecurityGroup" }
+				],
+				"UserData" : {
+					"Fn::Base64" : { "Fn::Join" : [ "", [
+						"#!/bin/bash\n",
+						"yum -y install puppet-client\n",
+						"set\n",
+						"/bin/echo Hello World!\n"]
+						]}
+
+				}
+			}
+		}
+    }
+}
